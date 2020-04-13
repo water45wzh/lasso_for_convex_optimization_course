@@ -1,0 +1,891 @@
+\documentclass[]{article}
+\usepackage{fontspec}
+\usepackage{graphicx}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumerate}
+\usepackage{longtable}
+\usepackage{indentfirst}
+\usepackage{mathrsfs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+%\usepackage{algpseudocode}
+\usepackage{epsfig}
+\usepackage{hyperref}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}} % Use Input in the format of Algorithm
+\renewcommand{\algorithmicensure}{\textbf{Output:}} % Use Output in the format of Algorithm
+
+%opening
+\title{Homework 5 Report \\ \large{for “Convex Optimization”}}
+\author{Zehao Wang, 1700010718}
+
+\begin{document}
+
+\maketitle
+
+\section*{Algorithms for $\ell_1$ minimization}
+\noindent
+Consider the $\ell_1$-regularized problem
+\begin{equation}\label{l1}
+	\min_x\quad \frac{1}{2}||Ax-b||_2^2 + \mu||x||_1,
+\end{equation}
+where $A\in\mathbb{R}^{m\times n}$, $b\in \mathbb{R}^m$ and $\mu > 0$ are given.
+
+\subsection*{Basic Setting}
+\begin{itemize}
+	\item seed = 97006855;
+	\item $\text{Errfun}(x,y) = \frac{||x-y||}{1+||x||}$, all of the Errfun results are computing as y with result of l1\_cvx\_mosek as $x$
+	\item default stop condition is $(||x_{now}-x_{prev}|| < err) \vee (num\_iter < max\_iter)$ 
+	\item sparsity$(x)$ $=$ $\frac{\sum_i\mathbb{I}(abs(x_i) < threshold)}{length(x)}$, where $threshold = 1e-9$
+\end{itemize}
+
+\newpage
+
+\section*{Result Glance}
+
+\begin{table}[!h]
+	\caption{Results of all solvers.}
+	\label{resg}
+\begin{center}
+	\begin{tabular}{l|c c c c c}
+		\hline
+		Solver & Fval & Errfun & Time(s) & Iter & Sparsity\\
+		\hline
+		l1\_cvx\_mosek &0.080876507245464 & N/A & N/A & N/A & N/A \\
+		\hline
+		l1\_cvx\_gurobi & 0.080876507407497 & 2.01e-08 & 1.15 & N/A & 0.3525 \\
+		\hline
+		l1\_mosek & 0.080876800468350 & 4.41e-06 & 1.48 & N/A & 0.0020 \\
+		\hline
+		l1\_gurobi & 0.080876390758893 & 2.54e-06 & 1.95 & N/A & 0.7520 \\
+		\hline
+		l1\_PGD\_primal & 0.080876390321693 & 2.54e-06 & 1.15 & 630 & 0.8652 \\
+		\hline
+		l1\_SGD\_primal & 0.080876405664217 & 2.58e-06 & 0.66 & 8945 & 0.0322 \\
+		\hline
+		l1\_GD\_primal & 0.080876530783799 & 4.32e-06 & 0.56 & 7615 & 9.7656e-04 \\
+		\hline
+		l1\_FGD\_primal & 0.080876530455554 & 4.30e-06 & 0.37 & 4878 & 9.7656e-04 \\
+		\hline
+		l1\_ProxGD\_primal & 0.080876390303637 & 2.51e-06 & 0.24 & 2268 & 0.8662 \\
+		\hline
+		l1\_FProxGD\_primal & 0.080876390303716 & 2.50e-06 & 0.19 & 1814 & 0.8662 \\
+		\hline
+		l1\_ALM\_dual & 0.080876202050527 & 2.29e-06 & 1.21 & 525 & 0.8447 \\
+		\hline
+		l1\_ADMM\_dual & 0.080876390303716 & 5.70e-06 & 1.01 & 580 & 0 \\
+		\hline
+		l1\_ADMM\_lprimal & 0.080876390303716 & 3.06e-06 & 0.66 & 329 & 9.7656e-04 \\
+		\hline
+	\end{tabular}
+\end{center}
+\end{table}
+
+\subsubsection*{Remark}
+In the previous report, we use norm(*,2) in Matlab to compute our algorithms' final value, it will output 0.0811 as the Fval, but when we change the 2-norm's computation to vector's inner product, it turns to be 0.809.
+
+\subsubsection*{Claim}
+I talk with Haotong Yang about some of my algorithms and his.
+
+\newpage
+
+\section{Problem 1}
+Solve \ref{l1} using CVX by calling different solvers mosek and gurobi.
+
+
+\section{Problem 2}
+First write down an equivalent model of \ref{l1} which can be solved by calling mosek and gurobi directly, then implement the codes.
+\subsection{Reformulate to QP}
+We can easily rewrite the $\ell_1$ minimization problem to a Quadratic Programming as follows,
+\begin{equation}
+\begin{array}{ll}
+ \min_y & \frac{1}{2} y^TQy + c^Ty, \\
+ &\\
+{s.t.} &  L y\preceq u,\\
+ &-Ly \preceq -l,
+\end{array}
+\end{equation}
+where
+$$y\in \mathbb{R}^{(2n+m)},\quad
+Q = \left[ 
+\begin{matrix}
+0 & 0 & 0 \\
+0 & 0 & 0 \\
+0 & 0 & I_m
+\end{matrix}
+\right] \in \mathbb{R}^{(n+n+m)\times(n+n+m)}, $$
+$$c = \left[ 
+\begin{matrix}
+0\\
+\mu\mathbf{1}_n  \\
+0
+\end{matrix}
+\right] \in \mathbb{R}^{(n+n+m)}, \quad
+L = \left[ 
+\begin{matrix}
+I_n & -I_n & 0 \\
+-I_n & -I_n & 0 \\
+A & 0 & -I_m
+\end{matrix}
+\right] \in \mathbb{R}^{(n+n+m)\times(n+n+m)}, $$
+$$l = \left[ 
+\begin{matrix}
+-\infty\\
+b
+\end{matrix}
+\right] \in \mathbb{R}^{(2n+m)}, \quad
+u = \left[ 
+\begin{matrix}
+0\\
+b
+\end{matrix}
+\right] \in \mathbb{R}^{(2n+m)}, $$
+
+
+
+\section{Problem 3}
+First write down, then implement the following algorithms in Matlab (or Python):
+
+\subsection{(a) PGD}
+\noindent
+Projection gradient method by reformulating the primal problem as a quadratic program with box constraints.
+\subsubsection{Reformulate to QP}
+We can easily rewrite the $\ell_1$ minimization problem to a Quadratic Programming for this method as follows,
+\begin{equation}
+	\begin{array}{ll}
+		\min_x & \frac{1}{2} ||W\hat{x}-b||_2^2 + \mu\mathbf{1}_{2n}^T\hat{x}, \\
+		&\\
+		{s.t.} &  -\hat{x} \preceq 0,
+	\end{array}
+\end{equation}
+the feasible domain of this problem is $S=\mathbb{R}_+^{2n}$, then we can define the projection function as follows,
+\begin{equation}
+	P_S(\hat{x}) = \text{arg}\min_{y\succeq 0}||\hat{x}-y||_2^2 = \max(\hat{x},0),
+\end{equation}
+where max means element-wise maximization.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+The basic Progection Gradient Method (PGD) is shown in Algorithm \ref{pgd},
+\begin{algorithm}[!h]
+	\caption{Basic PGD Method}
+	\label{pgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x=x_0$
+		\WHILE{Stop Conditions}
+		\STATE compute gradient $g$
+		\STATE choose a proper step size $t$
+		\STATE $x=P_S(x-tg)$
+		\ENDWHILE
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+We can improve the basic PGD method (\ref{ipgd}) to adapt our specific problem, 
+
+\begin{algorithm}[!h]
+	\caption{Improved PGD Method for this problem}
+	\label{ipgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule
+		\STATE $W = [A -A]$
+		\STATE $x=x_0$
+		\FOR{$c$ in Multi\_$\mu$\_Schedule}
+		\STATE $\mu_{now} = c\mu$
+		\WHILE{Stop Conditions}
+		\STATE $x^+ = P_S(x)$   
+		\STATE $x^- = x^+-x$   
+		\STATE $\hat{x} = [x^+;x^-]$
+		\STATE $g = W^T(W\hat{x}-b)+\mu_{now}\mathbf{1}_{2n}$ \# compute gradient
+		\STATE $t = \frac{g^Tg}{g^TW^TWg}$ \# compute exact step size
+		\STATE $\hat{x}=P_S(\hat{x}-tg)$
+		\STATE $x = \hat{x}(1:n)-\hat{x}(n+1:2n)$
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Let me explain the idea in above algorithm, first we consider that this problem has several local minima so that we should choose a not-bad initial value $x_0$ for it, but it can only get $x_0$ randomly, so I make a Multi\_$\mu$\_Schedule in order to choose some easier $\mu$ first, after the easier problem iterates for some rounds, use the output of this iteration for next $\mu$ in the schedule, the final $\mu$ in this schedule is the original $\mu$. This idea is come from Sparse Reconstruction.
+
+Because of the existence of the explicit optima of update of $\hat{x}$, we choose this exact step size for update per step.
+
+Where the hyperparameters mentioned above are as follows,
+\begin{itemize}
+	\item err: 1e-8
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [500,500,500,500,1e+6]
+\end{itemize}
+
+
+
+\subsection{(b) SGD}
+\noindent
+Subgradient method for the primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+We can use Subgradient method (SGD) directly for this problem. We choose $g = A^T(Ax-b)+\mu \text{sgn}(x) \in \partial f$ as the subgradient to compute.
+
+
+First we show the basic SGD method in Algorithm \ref{sgd},
+
+\begin{algorithm}[!h]
+	\caption{Basic SGD Method}
+	\label{sgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x=x_0$
+		\WHILE{Stop Conditions}
+		\STATE compute subgradient $g$
+		\STATE choose a proper step size $t$
+		\STATE $x = x-tg$
+		\ENDWHILE
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+
+We can improve the basic SGD method (\ref{isgd}) to adapt our specific problem, 
+
+\begin{algorithm}[!h]
+	\caption{Improved SGD Method for this problem}
+	\label{isgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\STATE $x=x_0$
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE $g = A^T(Ax-b)+\mu \text{sgn}(x)$ \# compute subgradient
+		\STATE $t = \frac{\alpha}{\sqrt{k}}$ \# compute step size
+		\STATE $x=x-tg $
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+The reason why we import two schedules to this algorithm is to accelerate this algorithm and help it to find the global optimum. Multi\_$\mu$\_Schedule is as same as before. Because of the implicit existence of the optimal step size per step, we choose $t=\frac{\alpha}{\sqrt{k}}$ as our step size, Step\_Size\_Schedule is designed for $\alpha$ followed the following principle,
+\begin{enumerate}
+	\item diminishing step size
+	\item alternating size to find global optimum quickly
+\end{enumerate}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-7
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [1e+3,1e+3,1e+3,1e+3,1e+6]
+	\item Step\_Size\_Schedule: [3*1e-3,3*1e-3,3*1e-3,1e-3,3*1e-3]
+\end{itemize}
+
+
+\subsection{(c) GD}
+\noindent
+Gradient method for the smoothed primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+First we should choose a proper smoothed function for $||*||_1$. Due to the lecture, we can use Huber panalty as smoothed absolute value, then it will be easy to construct a smoothed function $\psi$ as follows,
+\begin{equation}
+\phi_{\alpha}(z)=\left\{\begin{array}{ll}{z^{2} / 2(\alpha)} & {|z| \leq \alpha} \\ {|z|-\alpha / 2} & {|z| \geq \alpha}\end{array}\right. , 
+\end{equation}
+
+\begin{equation}
+	\psi_{\alpha}(x_1, ... , x_n) = \sum_{i=1}^{n} \phi_{\alpha}(x_i).
+\end{equation}
+$\alpha$ controls accuracy and smoothness. The detailed analysis of the accuracy and complexity can be found in the lecture.
+
+First we show the basic Gradient Descent Method in Algorithm \ref{gd}
+
+
+\begin{algorithm}[!h]
+	\caption{Basic GD Method}
+	\label{gd}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x=x_0$
+		\WHILE{Stop Conditions}
+		\STATE compute gradient $g$
+		\STATE choose a proper step size $t$
+		\STATE $x=x-tg$
+		\ENDWHILE
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Then we treat $\frac{1}{2}||Ax-b||_2^2 + \mu\psi_{\alpha}(x)$ as our new objective function. The gradient of this function is
+\begin{equation}
+\begin{array}{r l}
+& A^T(Ax-b) + \mu\nabla\psi_{\alpha}(x)\\
+=& A^T(Ax-b) + \mu(\phi_{\alpha}'(x_i))_{i\in[n]}\\
+\end{array}
+\end{equation}
+ where $\phi_{\alpha}^{\prime}\left(x_{i}\right)=\operatorname{sgn}\left(x_{i}\right) \min \left\{\frac{\left|x_{i}\right|}{\alpha}, 1\right\}=\left\{\begin{array}{l}{1, x_{i} \geq \alpha} \\ {\frac{x_{i}}{\alpha},-\alpha<x_{i}<\alpha} \\ {-1, x_{i} \leq-\alpha}\end{array}\right.$.
+ 
+ 
+Then we can implement GD Method to this function. Basic idea is as same as above, we show the improved GD Method as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved GD Method for this problem}
+	\label{igd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\STATE $x=x_0$
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE $g = A^T(Ax-b)+\mu \nabla \psi_{\alpha}(x)$ \# compute gradient
+		\STATE $t = \frac{\alpha}{\sqrt{k}}$ \# compute step size
+		\STATE $x=x-tg $
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-10
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [1e+3,1e+3,1e+3,1e+3,1e+6]
+	\item Step\_Size\_Schedule: 3e-3
+	\item multi\_$\alpha$: 1e-3
+\end{itemize}
+
+\subsection{(d) FGD}
+\noindent
+Fast gradient method for the smoothed primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+Smoothed function is the same as it described above. 
+
+First we show the basic Fast Gradient Descent Method in Algorithm \ref{fgd}.
+\begin{algorithm}[!h]
+	\caption{Basic FGD Method}
+	\label{fgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x^{(0)}=x_0$
+		\STATE $v^{(0)}=x_0$
+		\STATE $k=1$
+		\WHILE{Stop Conditions}
+		\STATE $y=(1-\theta_k)x^{(k-1)} + \theta_k v^{(k-1)}$
+		\STATE compute gradient $g$ at $y$
+		\STATE choose a proper step size $t$
+		\STATE $x^{(k)}=y-tg$
+		\STATE $v^{(k)} = x^{(k-1)} + \frac{1}{\theta_k}(x^{(k)}-x^{(k-1)})$
+		\STATE $k=k+1$
+		\ENDWHILE
+		\ENSURE $x^{(k-1)}$
+	\end{algorithmic}
+\end{algorithm}
+
+Here we choose $\theta_k = \frac{2}{k+1}$.
+
+Then we can implement FGD Method to this function. Basic idea is as same as above, we show the improved FGD Method as follows,
+
+
+\begin{algorithm}[!h]
+	\caption{Improved FGD Method for this problem}
+	\label{igd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $x^{(0)}=x_0$
+		\STATE $v^{(0)}=x_0$
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE $\theta_k=\frac{2}{k+1}$
+		\STATE $y=(1-\theta_k)x^{(k-1)} + \theta_k v^{(k-1)}$
+		\STATE $g = A^T(Ay-b)+\mu \nabla \psi_{\alpha}(y)$ \# compute gradient at $y$
+		\STATE $t = \frac{\alpha}{\sqrt{k}}$ \# compute step size
+		\STATE $x^{(k)}=y-tg$
+		\STATE $v^{(k)} = x^{(k-1)} + \frac{1}{\theta_k}(x^{(k)}-x^{(k-1)})$
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x^{(k-1)}$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-10
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [1e+3,1e+3,1e+3,1e+3,1e+6]
+	\item Step\_Size\_Schedule: 3e-3
+	\item multi\_$\alpha$: 1e-3
+\end{itemize}
+
+\subsubsection{Result}
+Shown in Table \ref{resg}.
+
+
+\subsection{(e) ProxGD}
+\noindent
+Proximal gradient method for the primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+First let objective function $f(x) = g(x) + h(x)$, where
+$$g(x) = \frac{1}{2}||Ax-b||_2^2,$$
+$$h(x) = \mu||x||_1.$$
+
+Then we have 
+\begin{equation}
+	\text{Prox}_{th} (x)_i = \text{sign}(x_i)\text{max}(|x_i|-t\mu, 0) = \left\{\begin{array}{ll}
+	x_i-t\mu ,& x_i\geq t\mu \\
+	0, & -t\mu\leq x_i\leq t\mu \\
+	x_i + t\mu , & x_i\leq t\mu
+	\end{array}\right. ,
+\end{equation}
+
+where $t$ is the step-size.
+
+
+First we show the basic Proximal Gradient Descent Method in Algorithm \ref{proxgd}
+
+
+\begin{algorithm}[!h]
+	\caption{Basic ProxGD Method}
+	\label{proxgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x=x_0$
+		\WHILE{Stop Conditions}
+		\STATE compute gradient $g$ of the first function $g(x)$
+		\STATE choose a proper step size $t$
+		\STATE $x=\text{Prox}_{th}(x-tg)$
+		\ENDWHILE
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Then we can implement ProxGD Method to this problem. Basic idea is as same as above, we show the improved ProxGD Method to adapt our problem in order to converge quickly as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved ProxGD Method for this problem}
+	\label{iproxgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\STATE $x=x_0$
+		\STATE $t = \frac{1}{||A||_2^2}$ \# set the fixed step size
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE $g = A^T(Ax-b)$ \# compute gradient of $g(x)$
+		\STATE $x=\text{Prox}_{th}(x-tg)$
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-10
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [5e+2,5e+2,5e+2,5e+2,1e+6]
+\end{itemize}
+
+
+\subsection{(f) FProxGD}
+\noindent
+Fast proximal gradient method for the primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+Proximal function and other detailed information are the same as they described above. 
+
+First we show the basic Fast Proximal Gradient Descent Method in Algorithm \ref{fproxgd}
+
+
+\begin{algorithm}[!h]
+	\caption{Basic FProxGD Method}
+	\label{fproxgd}
+	\begin{algorithmic}
+	\REQUIRE $x_0$
+	\STATE $x^{(0)}=x_0$
+	\STATE $v^{(0)}=x_0$
+	\STATE $k=1$
+	\WHILE{Stop Conditions}
+	\STATE $y=(1-\theta_k)x^{(k-1)} + \theta_k v^{(k-1)}$
+	\STATE compute gradient $g$ at $y$
+	\STATE choose a proper step size $t$
+	\STATE $x^{(k)}=\text{Prox}_{th}(y-tg)$
+	\STATE $v^{(k)} = x^{(k-1)} + \frac{1}{\theta_k}(x^{(k)}-x^{(k-1)})$
+	\STATE $k=k+1$
+	\ENDWHILE
+	\ENSURE $x^{(k-1)}$
+\end{algorithmic}
+\end{algorithm}
+Then we can implement FProxGD Method to this function. Basic idea is as same as above, we show the improved FProxGD Method as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved FProxGD Method for this problem}
+	\label{ifproxgd}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $t = \frac{1}{||A||_2^2}$ \# set the fixed step size
+		\STATE $x^{(0)}=x_0$
+		\STATE $v^{(0)}=x_0$
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE $\theta_k=\frac{2}{k+1}$
+		\STATE $y=(1-\theta_k)x^{(k-1)} + \theta_k v^{(k-1)}$
+		\STATE $g = A^T(Ay-b)$ \# compute gradient of $g(x)$ at $y$
+		\STATE $x^{(k)}=\text{Prox}_{th}(y-tg)$
+		\STATE $v^{(k)} = x^{(k-1)} + \frac{1}{\theta_k}(x^{(k)}-x^{(k-1)})$
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x^{(k-1)}$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-10
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [5e+2,5e+2,5e+2,5e+2,1e+6]
+\end{itemize}
+
+
+\subsection{(g) ALM\_dual}
+\noindent
+Augmented Lagrangian method for the dual problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+First we can reformulate the primal problem as follows,
+\begin{equation}
+\begin{array}{ll}
+\min_{x,y} & \frac{1}{2} ||y-b||_2^2+\mu||x||_1 \\
+&\\
+{s.t.} &  Ax-y=0.
+\end{array}
+\end{equation}
+
+Then we can write the Lagrange function and the dual problem of the above problem,
+\begin{equation}
+	L(x,y,\lambda) \ = \ \frac{1}{2}||y-b||_2^2+\mu||x||_1+\lambda^T(Ax-y),
+\end{equation}
+\begin{equation}
+	g(\lambda) \ =\ \inf_{x,y}L(x,y,\lambda)=-(\frac{1}{2}||\lambda||_2^2+b^T\lambda) -I_{||\cdot||_{\infty}\leq \mu}(A^T\lambda),
+\end{equation}
+where $I$ is the indicator function.
+
+After that, we rewrite this dual problem as follows,
+\begin{equation}\label{dual}
+\begin{array}{ll}
+\min_{z,w} & f_1(z)+f_2(w) \\
+&\\
+{s.t.} &  A^Tz-w=0,
+\end{array}
+\end{equation}
+
+where
+\begin{equation}
+	f_1(z) \ = \ \frac{1}{2}||z||_2^2+b^Tz,
+\end{equation}
+\begin{equation}
+	f_2(w)\ = \ I_{||\cdot||_{\infty}\leq \mu}(w).
+\end{equation}
+
+
+Our goal is to implement Augmented Lagrange Method (ALM) to the above problem, the point is to compute
+	$$(\hat{z}, \hat{w}) = \arg\min_{z,w}(\frac{1}{2}||z||_2^2+b^Tz + I_{||\cdot||_{\infty}\leq \mu}(w) + \frac{t}{2}||A^Tz-w+\frac{1}{t}\lambda||_2^2)$$
+\begin{equation}\label{alm_obj}
+	= \ \arg\min_{z, ||w||_{\infty\leq\mu}} (\frac{1}{2}||z||_2^2+b^Tz + \frac{t}{2}||A^Tz-w+\frac{1}{t}\lambda||_2^2).
+\end{equation}
+	
+First we compute the gradient w.r.t. $z$:
+$$z+b+A(tA^Tz-tw+\lambda) = 0,$$
+then we have
+\begin{equation}\label{alm_z}
+	z = (I+tAA^T)^{-1}(tAw-A\lambda - b).
+\end{equation}
+
+Consider the inequality constraint of $w$, we can get the equation which $w$ should have,
+\begin{equation}
+	w = P_{||\cdot||_{\infty}\leq \mu}(A^Tz+\frac{1}{t}\lambda),
+\end{equation}
+where $P_C(u)$ is the projection of $u$ on set $C$. But it's difficult to solve it, so we only solve it approximately.
+
+We can regard this sub-optimization problem in this iteration as a two level optimization, that is, we can first fix $w$ to compute an optimal $z=z(w)$, then put this $z(w)$ into the object function and compute the optimal $w$ of current object function which is only w.r.t. $w$.
+
+As we said above, first we put (\ref{alm_z}) into (\ref{alm_obj}), then it will be only w.r.t. $w$ as follows,
+\begin{equation}\label{alm_obj_w}
+	\hat{w} \ = \ \arg\min_{||w||_{\infty\leq\mu}}-\frac{1}{2}(t A w-A \lambda-b)^{T}\left(I+t A A^{T}\right)^{-1}(t A w-A \lambda-b)-\lambda^{T} w+\frac{t}{2} w^{T} w,
+\end{equation}
+then compute the gradient of (\ref{alm_obj_w}) w.r.t. $w$ without the inequality constraint, 
+
+$$(t^{2} A^{T}\left(I+t A A^{T})^{-1} A-t I\right) w=-\lambda+t A^{T}\left(I+t A A^{T}\right)^{-1}(A \lambda+b),$$
+that is,
+\begin{equation}
+ w= (t^{2} A^{T}\left(I+t A A^{T})^{-1} A-t I\right)^{-1}(-\lambda+t A^{T}\left(I+t A A^{T}\right)^{-1}(A \lambda+b)),
+\end{equation}
+
+But if we now project this $w$ to its constrained set, in experiments we found it can not converge to the correct optimal value. We conjecture that it may not be the optimal $w$ of the 'primal' sub-optimization problem, because the current $w$'s projection may be on the boundary of its constrained set like a 'cusp', so it could be far away from the correct optimal $w$ of this problem. So we'd like to add a penalty function of $w$'s norm to let it be closed to the correct optimal, i.e., far away from the cusps of the set's boundary. 
+
+According to the above discuss, we improve the object function (\ref{alm_obj_w}) as follows,
+$$\hat{w} \ = \ \arg\min_{||w||_{\infty\leq\mu}}...+ \boldsymbol{\alpha*\frac{t}{2} w^{T} w}$$
+\begin{equation}\label{alm_w}
+	= (t^{2} A^{T}\left(I+t A A^{T})^{-1} A- (1+\boldsymbol{\alpha})t I\right)^{-1}(-\lambda+t A^{T}\left(I+t A A^{T}\right)^{-1}(A \lambda+b))
+\end{equation}
+
+Finally, 
+\begin{equation}\label{alm_zz}
+	z = (I+tAA^T)^{-1}(tAw-A\lambda-b).
+\end{equation}
+
+According to KKT condition, we can easily compute $x$ from $z$ as follows,
+$$Ax = z+b, $$
+and for every element in $A^Tz$, if it doesn't equal to $\mu$ or $-\mu$, we should delete this column and corresponding element in $x$, then after the following calculation (\ref{alm_x}), add $0$ to the deleted positions in $x$,
+\begin{equation}\label{alm_x}
+	x = (A^TA)^{-1}A^T(z+b).
+\end{equation}
+
+First we show the basic Augmented Lagrangian Method in Algorithm \ref{alm}, 
+
+
+\begin{algorithm}[!h]
+	\caption{Basic Augmented Lagrangian Method}
+	\label{alm}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x^{(0)}=x_0$
+		\STATE $w = 0, z = 0$
+		\STATE step\_size $t = 1$
+		\WHILE{Stop Conditions}
+		\STATE update $w$ by (\ref{alm_w})
+		\STATE project $w$ to its constrained set
+		\STATE update $z$ by (\ref{alm_zz})
+		\ENDWHILE
+		\STATE compute $x$ from $z$ by (\ref{alm_x})
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+Then we can implement Augmented Lagrangian Method to this problem. Basic idea is as same as above, we show the improved ALM as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved ALM for this problem}
+	\label{ialm}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $t = 1$ \# set the fixed step size
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE update $w$ by (\ref{alm_w})
+		\STATE project $w$ to its constrained set
+		\STATE update $z$ by (\ref{alm_zz})
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\STATE compute $x$ from $z$ by (\ref{alm_x})
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-10
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [50,50,50,50,1e+6]
+	\item slack for $w$: 1
+\end{itemize}
+
+
+
+\subsection{(h) ADMM\_dual}
+\noindent
+Alternating direction method of multipliers for the dual problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+The dual form of the primal problem is as same as (\ref{dual}), then we have,
+$$w_k = \arg\min_{w}(I_{||\cdot||_{\infty}\leq \mu}(w)-\lambda_{k-1}^Tw+\frac{t}{2}||A^Tz-w||_2^2)$$
+\begin{equation}\label{admm_w}
+	= P_{||\cdot||_{\infty}\leq \mu}(A^Tz_{k-1}+\frac{1}{t}\lambda_{k-1}),
+\end{equation}
+$$z_k = \arg\min_{z}(b^Tz+\frac{1}{2}||z||_2^2 + \lambda_{k-1}^TA^Tz+\frac{t}{2}||A^Tz-w||_2^2)$$
+\begin{equation}\label{admm_z}
+= (I+tAA^T)^{-1}(tAw_k-A\lambda_{k-1}-b),
+\end{equation}
+\begin{equation}\label{admm_l}
+	\lambda_k = \lambda_{k-1} + t(A^Tz-w).
+\end{equation}
+
+
+According to KKT condition, we can easily compute $x$ from $\lambda$ as follows,
+\begin{equation}
+	x = -\lambda,
+\end{equation}
+
+so during the iteration, we can use $x$ to compute directly instead of $\lambda$.
+
+First we show the basic ADMM in Algorithm \ref{admm_d}
+
+
+\begin{algorithm}[!h]
+	\caption{Basic ADMM}
+	\label{admm_d}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x^{(0)}=x_0$
+		\STATE $k=1$
+		\WHILE{Stop Conditions}
+		\STATE compute gradient $g$ at $y$
+		\STATE choose a proper step size $t$
+		\STATE update $w$ by (\ref{admm_w})
+		\STATE update $z$ by (\ref{admm_z})
+		\STATE update $\lambda$ by (\ref{admm_l})
+		\STATE $k=k+1$
+		\ENDWHILE
+		\STATE $x = -\lambda$
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+Then we can implement ADMM to this problem. Basic idea is as same as above, we show the improved ADMM as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved ADMM for this problem}
+	\label{iadmm_d}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $t = 1$ \# set the fixed step size
+		\STATE $x^{(0)}=x_0$
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE update $w$ by (\ref{admm_w})
+		\STATE update $z$ by (\ref{admm_z})
+		\STATE update $\lambda$ by (\ref{admm_l})
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\STATE $x = -\lambda$
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-8
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [50,50,50,50,1e+6]
+\end{itemize}
+
+\subsection{(i) ADMM\_lprimal}
+\noindent
+Alternating direction method of multipliers with linearization for the primal problem.
+
+\subsubsection{Algorithm \& Numerical Experiment}
+
+First we can rewrite the primal problem as follows,
+\begin{equation}\label{primal}
+	\begin{array}{ll}
+		\min_{x,w} & \frac{1}{2}||Ax-b||_2^2 + \mu||w||_1 \\
+		&\\
+		{s.t.} &  x-w=0,
+	\end{array}
+\end{equation}
+
+the Lagrange function of this problem is
+\begin{equation}
+\frac{1}{2}||Ax-b||_2^2+\mu||z||_1|+\lambda^T(x-z)+\frac{t}{2}||x-w||_2^2
+\end{equation}
+
+then we implement ADMM to (\ref{primal}),
+$$ x_k = \arg\min_{x} ( \frac{1}{2}||Ax-b||_2^2+\frac{t}{2}||x-w_{k-1}+\frac{\lambda_{k-1}}{t}||_2^2)$$
+\begin{equation}\label{admmp_x}
+	=(tI+A^TA)^{-1}(A^Tb+tw_{k-1}-\lambda_{k-1}),
+\end{equation}
+$$ w_k = \arg\min_{w}(\mu||w||_1|+\frac{t}{2}||x_k-w+\frac{\lambda_{k-1}}{t}||_2^2))$$
+\begin{equation}\label{admmp_w}
+	\approx P_{\frac{\mu}{t}||\cdot||_1}(x_k+\frac{\lambda_{k-1}}{t}),
+\end{equation}
+\begin{equation}\label{admmp_l}
+\lambda_k = \lambda_{k-1}+t(x_k-w_k).
+\end{equation}
+
+First we show the basic ADMM in Algorithm \ref{admmp}
+
+
+\begin{algorithm}[!h]
+	\caption{Basic ADMM}
+	\label{admmp}
+	\begin{algorithmic}
+		\REQUIRE $x_0$
+		\STATE $x^{(0)}=x_0$
+		\STATE $k=1$
+		\WHILE{Stop Conditions}
+		\STATE compute gradient $g$ at $y$
+		\STATE choose a proper step size $t$
+		\STATE update $x$ by (\ref{admmp_x})
+		\STATE update $w$ by (\ref{admmp_w})
+		\STATE update $\lambda$ by (\ref{admmp_l})
+		\STATE $k=k+1$
+		\ENDWHILE
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+Then we can implement ADMM to this problem. Basic idea is as same as above, we show the improved ADMM as follows,
+
+\begin{algorithm}[!h]
+	\caption{Improved ADMM for this problem}
+	\label{iadmmp_d}
+	\begin{algorithmic}
+		\REQUIRE $x_0, \ A,\  b,\  \mu $, Multi\_$\mu$\_Schedule, Step\_Size\_Schedule
+		\FOR{$c$ in Multi\_$\mu$\_Schedule, $\alpha$ in Step\_Size\_Schedule}
+		\STATE $t = 1$ \# set the fixed step size
+		\STATE $x^{(0)}=x_0$
+		\STATE $\mu_{now} = c\mu$
+		\STATE $k = 1$
+		\WHILE{Stop Conditions}
+		\STATE update $x$ by (\ref{admmp_x})
+		\STATE update $w$ by (\ref{admmp_w})
+		\STATE update $\lambda$ by (\ref{admmp_l})
+		\STATE $k = k + 1$ \# update number of iteration in this epoch
+		\ENDWHILE
+		\ENDFOR
+		\ENSURE $x$
+	\end{algorithmic}
+\end{algorithm}
+
+Where the hyperparameters mentioned above are as follows,
+
+\begin{itemize}
+	\item err: 1e-8
+	\item Multi\_$\mu$\_Schedule: [1e+4,1e+3,1e+2,1e+1,1]
+	\item Max\_Iter\_Schedule: [50,50,50,50,1e+6]
+\end{itemize}
+
+\end{document}
